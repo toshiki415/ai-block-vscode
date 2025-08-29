@@ -17,7 +17,7 @@ export async function ai_block(
     if (!apikey) {
         // APIキーが設定されていない場合、ユーザーに設定を促すエラーメッセージを表示
         vscode.window.showErrorMessage(
-            'Gemini APIキーが設定されていません。VS Codeの設定で "aiblock.geminiApiKey" を設定してください。'
+            'Gemini APIキーが設定されていません。VSCodeの設定で "aiblock.geminiApiKey" を設定してください。'
         );
         throw new Error("APIキーが設定されていません。");
     }
@@ -43,7 +43,24 @@ export async function ai_block(
 
     const result = await model.generateContent(fullPrompt);
     const responseText = result.response.text();
-    const parsedResponse = JSON.parse(responseText);
+    console.log('API Raw Response:', responseText); // デバッグ用に生の応答をログに出力
 
-    return parsedResponse as GeneratedCode;
+    try {
+        // 応答からJSONオブジェクトの部分だけを正規表現で抽出
+        const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+        if (!jsonMatch) {
+            throw new Error('APIの応答にJSONオブジェクトが見つかりませんでした。');
+        }
+
+        const jsonString = jsonMatch[0];
+        const parsedResponse = JSON.parse(jsonString);
+
+        return parsedResponse as GeneratedCode;
+
+    } catch (error) {
+        console.error('JSONの解析に失敗しました。', error);
+        console.error('失敗した応答テキスト:', responseText); // 解析に失敗した文字列をログに出力
+        // エラーを再スローして、extension.tsのcatchブロックで処理できるようにする
+        throw new Error('APIからの応答をJSONとして解析できませんでした。');
+    }
 }

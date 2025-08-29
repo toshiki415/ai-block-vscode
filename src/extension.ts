@@ -35,117 +35,161 @@ class AiBlockViewProvider implements vscode.WebviewViewProvider {
 			]
 		};
 
-		webviewView.webview.html = this._getHtmlForWebview('<h1>AIプレビュー</h1><p>AIが生成中です...</p>', '');
+		webviewView.webview.html = this._getHtmlForWebview();
 
-		try {
-			const html = `
-				<h2>ユーザープロフィール</h2>
-				<p>名前: 石田隼基</p>
-			`;
-
-			const result = await ai_block("モダンなカードデザインにして", html);
-
-			webviewView.webview.html = this._getHtmlForWebview(result.html, result.css);
-
-		} catch (error) {
-			console.error(error);
-			webviewView.webview.html = this._getHtmlForWebview('<h1>エラー</h1><p>結果の生成に失敗しました。</p>', '');
-		}
+		webviewView.webview.onDidReceiveMessage(async (message) => {
+			switch (message.command) {
+				case 'generate':
+					try {
+						this._view?.webview.postMessage({ command: 'showLoading' });
+						const result = await ai_block(message.prompt, message.html);
+						this._view?.webview.postMessage({ command: 'showResult', html: result.html, css: result.css });
+					} catch(error) {
+						console.error(error);
+						this._view?.webview.postMessage({ command: 'showError', message: '結果の生成に失敗しました。' });
+					}
+					return;
+			}
+		});
 	}
 
-	private _getHtmlForWebview(htmlContent: string, cssContent: string) {
-		// ウェブビューで実行されるメインスクリプトのローカルパスを取得し、ウェブビューで使用できる URI に変換します。
-
-		const escapeHtml = (unsafe: string) => {
-			return unsafe
-				.replace(/&/g, "&amp;")
-				.replace(/</g, "&lt;")
-				.replace(/>/g, "&gt;")
-				.replace(/"/g, "&quot;")
-				.replace(/'/g, "&#039;");
-		};
+	private _getHtmlForWebview() {
+		const scriptUri = this._view?.webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'main.js'));
 
 		return `<!DOCTYPE html>
-			<html lang="en">
+			<html lang="ja">
 			<head>
 				<meta charset="UTF-8">
 				<meta name="viewport" content="width=device-width, initial-scale=1.0">
 				<title>AI Preview</title>
 				<style>
 					body {
-						font-family: sans-serif;
-						padding: 1rem;
-					}
-					.code-container {
-						position: relative;
-						margin-top: 0.5rem;
-					}
-					pre {
-						font-family: monospace;
-						background-color: #000000;
-						padding: 1rem;
-						border: 1px solid #ddd;
-						border-radius: 4px;
-						white-space: pre-wrap;
-						word-break: break-all;
-					}
-					.copy-btn {
-						position: absolute;
-						top: 0.5rem;
-						right: 0.5rem;
-						padding: 4px 8px;
-						font-size: 12px;
-						cursor: pointer;
-						border: 1px solid #ccc;
-						border-radius: 4px;
-						background-color: #e9e9e9;
-					}
-					.copy-btn:hover {
-						background-color: #dcdcdc;
-					}
+                        font-family: sans-serif;
+                        padding: 1rem;
+                        color: var(--vscode-editor-foreground);
+                        background-color: var(--vscode-editor-background);
+                    }
+                    textarea, input {
+                        width: 100%;
+                        padding: 8px;
+                        margin-bottom: 10px;
+                        border: 1px solid var(--vscode-input-border);
+                        background-color: var(--vscode-input-background);
+                        color: var(--vscode-input-foreground);
+                        box-sizing: border-box; /* paddingを含めてwidth 100%にする */
+                    }
+                    textarea {
+                        height: 150px;
+                        resize: vertical;
+                    }
+                    button {
+                        width: 100%;
+                        padding: 10px;
+                        border: none;
+                        background-color: var(--vscode-button-background);
+                        color: var(--vscode-button-foreground);
+                        cursor: pointer;
+                        margin-bottom: 20px;
+                    }
+                    button:hover {
+                        background-color: var(--vscode-button-hoverBackground);
+                    }
+                    .result-container {
+                        margin-top: 1rem;
+                    }
+                    pre {
+                        background-color: var(--vscode-textBlockQuote-background);
+                        padding: 1rem;
+                        border: 1px solid var(--vscode-textBlockQuote-border);
+                        border-radius: 4px;
+                        white-space: pre-wrap;
+                        word-break: break-all;
+                    }
+                    .hidden {
+                        display: none;
+                    }
 				</style>
 			</head>
 			<body>
-				<h2>html:</h2>
-				<div class="code-container">
-					<pre id="html-code">${escapeHtml(htmlContent)}</pre>
-					<button class="copy-btn" data-target-id="html-code">コピー</button>
+				<h2>変換したいHTML</h2>
+				<textarea id="html-input" placeholder="ここにHTMLコードを貼り付け"></textarea>
+
+				<h2>AIへの指示</h2>
+				<input type="text" id="prompt-input" placeholder="例：モダンなカードデザインにして">
+
+				<button id="generate-btn">AIで生成する</button>
+
+				<div id="loading-indicator" class="hidden">
+					<p>AIが生成中です...</p>
 				</div>
 
-				<h2>css:</h2>
-				<div class="code-container">
-					<pre id="css-code">${cssContent}</pre>
-					<button class="copy-btn" data-target-id="css-code">コピー</button>
+				<div id="result-container" class="hidden">
+					<h2>HTML Result:</h2>
+					<pre id="html-result"></pre>
+
+					<h2>CSS Result:</h2>
+					<pre id="css-result"></pre>
+				</div>
+
+				<div id="error-container" class="hidden">
+					<h2>エラー</h2>
+					<p id="error-message"></p>
 				</div>
 
 				<script>
-					const buttons = document.querySelectorAll('.copy-btn');
+					(function() {
+						const vscode = acquireVsCodeApi();
 
-					buttons.forEach(button => {
-						button.addEventListener('click', (e) => {
-							// どのコードをコピーするかのIDを取得
-							const targetId = e.currentTarget.getAttribute('data-target-id');
-							const codeElement = document.getElementById(targetId);
+						const generateBtn = document.getElementById('generate-btn');
+						const htmlInput = document.getElementById('html-input');
+						const promptInput = document.getElementById('prompt-input');
 
-							if (codeElement) {
-								const textToCopy = codeElement.innerText;
+						const loadingIndicator = document.getElementById('loading-indicator');
+						const resultContainer = document.getElementById('result-container');
+						const errorContainer = document.getElementById('error-container');
 
-								// クリップボードに書き込む
-								navigator.clipboard.writeText(textToCopy).then(() => {
-									// 成功したらボタンの文字を変更
-									const originalText = e.currentTarget.textContent;
-									e.currentTarget.textContent = 'コピーしました！';
+						const htmlResult = document.getElementById('html-result');
+						const cssResult = document.getElementById('css-result');
+						const errorMessage = document.getElementById('error-message');
 
-									// 2秒後に元の文字に戻す
-									setTimeout(() => {
-										e.currentTarget.textContent = originalText;
-									}, 2000);
-								}).catch(err => {
-									console.error('コピーに失敗しました', err);
-								});
+						generateBtn.addEventListener('click', () => {
+							const html = htmlInput.value;
+							const prompt = promptInput.value;
+
+							if (!html || !prompt) {
+								return;
+							}
+
+							vscode.postMessage({
+								command: 'generate',
+								html: html,
+								prompt: prompt
+							});
+						});
+
+						window.addEventListener('message', event => {
+							const message = event.data;
+
+							loadingIndicator.classList.add('hidden');
+							resultContainer.classList.add('hidden');
+							errorContainer.classList.add('hidden');
+
+							switch (message.command) {
+								case 'showLoading':
+									loadingIndicator.classList.remove('hidden');
+									break;
+								case 'showResult':
+									htmlResult.textContent = message.html;
+									cssResult.textContent = message.css;
+									resultContainer.classList.remove('hidden');
+									break;
+								case 'showError':
+									errorMessage.textContent = message.message;
+									errorContainer.classList.remove('hidden');
+									break;
 							}
 						});
-					});
+					}());
 				</script>
 			</body>
 			</html>`;
