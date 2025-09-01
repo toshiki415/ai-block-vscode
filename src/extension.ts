@@ -2,7 +2,6 @@ import * as vscode from 'vscode';
 import { ai_block } from "./ai-block";
 
 export function activate(context: vscode.ExtensionContext) {
-
 	const provider = new AiBlockViewProvider(context.extensionUri);
 
 	context.subscriptions.push(
@@ -10,7 +9,6 @@ export function activate(context: vscode.ExtensionContext) {
 	}
 
 class AiBlockViewProvider implements vscode.WebviewViewProvider {
-
 	public static readonly viewType = 'aiblock.preview';
 
 	private _view?: vscode.WebviewView;
@@ -30,12 +28,11 @@ class AiBlockViewProvider implements vscode.WebviewViewProvider {
 			// ウェブビューでスクリプトを許可する
 			enableScripts: true,
 
-			localResourceRoots: [
-				this._extensionUri
-			]
+			// そして、拡張機能の `media` ディレクトリにあるコンテンツだけを読み込むようにウェブビューを制限する。
+			localResourceRoots: [vscode.Uri.joinPath(this._extensionUri, 'media')]
 		};
 
-		webviewView.webview.html = this._getHtmlForWebview();
+		webviewView.webview.html = this._getHtmlForWebview(webviewView.webview);
 
 		webviewView.webview.onDidReceiveMessage(async (message) => {
 			switch (message.command) {
@@ -53,62 +50,34 @@ class AiBlockViewProvider implements vscode.WebviewViewProvider {
 		});
 	}
 
-	private _getHtmlForWebview() {
-		const scriptUri = this._view?.webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'main.js'));
+	private _getHtmlForWebview(webview: vscode.Webview) {
+		// ウェブビューで実行されるメインスクリプトへのローカルパス
+		const scriptPath = vscode.Uri.joinPath(this._extensionUri, 'media', 'main.js');
+
+		// そして、このスクリプトをウェブビューにロードするために使用する URI を指定します。
+		const scriptUri = webview.asWebviewUri(scriptPath);
+
+		// CSSスタイルへのローカルパス
+		const stylesPath = vscode.Uri.joinPath(this._extensionUri, 'media', 'main.css');
+
+		// スタイルをウェブビューにロードするための Uri
+		const stylesUri = webview.asWebviewUri(stylesPath);
+
+		// nonceを使用して、特定のスクリプトの実行のみを許可する。
+    	const nonce = getNonce();
 
 		return `<!DOCTYPE html>
 			<html lang="ja">
 			<head>
 				<meta charset="UTF-8">
+
+				<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource}; script-src 'nonce-${nonce}';">
+
 				<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+				<link href="${stylesUri}" rel="stylesheet">
+
 				<title>AI Preview</title>
-				<style>
-					body {
-                        font-family: sans-serif;
-                        padding: 1rem;
-                        color: var(--vscode-editor-foreground);
-                        background-color: var(--vscode-editor-background);
-                    }
-                    textarea, input {
-                        width: 100%;
-                        padding: 8px;
-                        margin-bottom: 10px;
-                        border: 1px solid var(--vscode-input-border);
-                        background-color: var(--vscode-input-background);
-                        color: var(--vscode-input-foreground);
-                        box-sizing: border-box; /* paddingを含めてwidth 100%にする */
-                    }
-                    textarea {
-                        height: 150px;
-                        resize: vertical;
-                    }
-                    button {
-                        width: 100%;
-                        padding: 10px;
-                        border: none;
-                        background-color: var(--vscode-button-background);
-                        color: var(--vscode-button-foreground);
-                        cursor: pointer;
-                        margin-bottom: 20px;
-                    }
-                    button:hover {
-                        background-color: var(--vscode-button-hoverBackground);
-                    }
-                    .result-container {
-                        margin-top: 1rem;
-                    }
-                    pre {
-                        background-color: var(--vscode-textBlockQuote-background);
-                        padding: 1rem;
-                        border: 1px solid var(--vscode-textBlockQuote-border);
-                        border-radius: 4px;
-                        white-space: pre-wrap;
-                        word-break: break-all;
-                    }
-                    .hidden {
-                        display: none;
-                    }
-				</style>
 			</head>
 			<body>
 				<h2>変換したいHTML</h2>
@@ -136,62 +105,17 @@ class AiBlockViewProvider implements vscode.WebviewViewProvider {
 					<p id="error-message"></p>
 				</div>
 
-				<script>
-					(function() {
-						const vscode = acquireVsCodeApi();
-
-						const generateBtn = document.getElementById('generate-btn');
-						const htmlInput = document.getElementById('html-input');
-						const promptInput = document.getElementById('prompt-input');
-
-						const loadingIndicator = document.getElementById('loading-indicator');
-						const resultContainer = document.getElementById('result-container');
-						const errorContainer = document.getElementById('error-container');
-
-						const htmlResult = document.getElementById('html-result');
-						const cssResult = document.getElementById('css-result');
-						const errorMessage = document.getElementById('error-message');
-
-						generateBtn.addEventListener('click', () => {
-							const html = htmlInput.value;
-							const prompt = promptInput.value;
-
-							if (!html || !prompt) {
-								return;
-							}
-
-							vscode.postMessage({
-								command: 'generate',
-								html: html,
-								prompt: prompt
-							});
-						});
-
-						window.addEventListener('message', event => {
-							const message = event.data;
-
-							loadingIndicator.classList.add('hidden');
-							resultContainer.classList.add('hidden');
-							errorContainer.classList.add('hidden');
-
-							switch (message.command) {
-								case 'showLoading':
-									loadingIndicator.classList.remove('hidden');
-									break;
-								case 'showResult':
-									htmlResult.textContent = message.html;
-									cssResult.textContent = message.css;
-									resultContainer.classList.remove('hidden');
-									break;
-								case 'showError':
-									errorMessage.textContent = message.message;
-									errorContainer.classList.remove('hidden');
-									break;
-							}
-						});
-					}());
-				</script>
+				<script nonce="${nonce}" src="${scriptUri}"></script>
 			</body>
 			</html>`;
 	}
+}
+
+function getNonce() {
+	let text = '';
+	const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+	for (let i = 0; i < 32; i++) {
+		text += possible.charAt(Math.floor(Math.random() * possible.length));
+	}
+	return text;
 }
