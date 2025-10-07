@@ -9,7 +9,7 @@
     const generateBtn = /** @type {HTMLButtonElement} */ (document.getElementById('generate-btn'));
     const htmlInput = /** @type {HTMLTextAreaElement} */ (document.getElementById('html-input'));
     const promptInput = /** @type {HTMLInputElement} */ (document.getElementById('prompt-input'));
-    
+
     const loadingIndicator = /** @type {HTMLElement} */ (document.getElementById('loading-indicator'));
     const resultContainer = /** @type {HTMLElement} */ (document.getElementById('result-container'));
     const errorContainer = /** @type {HTMLElement} */ (document.getElementById('error-container'));
